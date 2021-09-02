@@ -15,6 +15,11 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
+// Handle the memory problem
+// Extend our application to allow for multiple frames to be in-flight 
+// while still bounding the amount of work that piles up
+const int MAX_FRAMES_IN_FLIGHT = 2;
+
 // Using validation layers 
 const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -115,8 +120,11 @@ private:
     std::vector<VkCommandBuffer> commandBuffers;
 
     // Semaphore signals to control parallel
-    VkSemaphore imageAvailableSemaphore;
-    VkSemaphore renderFinishedSemaphore;
+    std::vector<VkSemaphore> imageAvailableSemaphores;
+    std::vector<VkSemaphore> renderFinishedSemaphores;
+    std::vector<VkFence> inFlightFences;
+    std::vector<VkFence> imagesInFlight;
+    size_t currentFrame = 0;
 
 public:
     // Baic programme logic
@@ -165,7 +173,8 @@ private:
         createCommandPool();
         createCommandBuffers();
 
-        createSemaphores();
+        //createSemaphores();
+        createSyncObjects();
     }
 
     void mainLoop()
@@ -175,12 +184,20 @@ private:
             glfwPollEvents();
             drawFrame();
         }
+
+        // For Debug
+        vkDeviceWaitIdle(device);
     }
 
     void cleanup()
     {
-        vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-        vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
+        {
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+            vkDestroyFence(device, inFlightFences[i], nullptr);
+        }
+
 
         vkDestroyCommandPool(device, commandPool, nullptr);
 
@@ -767,16 +784,50 @@ private:
     /// <summary>
     /// Semaphore signals
     /// </summary>
-    void createSemaphores()
+    /*void createSemaphores()
     {
+        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+
         VkSemaphoreCreateInfo semaphoreInfo{};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS) 
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
+            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS)
+            {
 
-            throw std::runtime_error("failed to create semaphores!");
+                throw std::runtime_error("failed to create semaphores for a frame!");
+            }
+        }
+    }*/
+
+    /// <summary>
+    /// Create the fences together with the semphores
+    /// </summary>
+    void createSyncObjects() 
+    {
+        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+        imagesInFlight.resize(swapChainImages.size(), VK_NULL_HANDLE);
+
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
+        {
+            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+                vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) 
+            {
+                throw std::runtime_error("failed to create synchronization objects for a frame!");
+            }
         }
     }
 
@@ -789,25 +840,40 @@ private:
     /// </summary>
     void drawFrame()
     {
+        vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+
         uint32_t imageIndex;
         // Acquiring
-        vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    
+        // vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+        vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+        if (imagesInFlight[imageIndex] != VK_NULL_HANDLE)
+        {
+            vkWaitForFences(device, 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
+        }
+        imagesInFlight[imageIndex] = inFlightFences[currentFrame];
+
         // Submitting the command buffer
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-        VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+        // VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+        VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
         VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
-        VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+        
+        // VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+        VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
     
+        vkResetFences(device, 1, &inFlightFences[currentFrame]);
+
+
         // Submit the command buffer to the graphics queue
         if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
         {
@@ -829,6 +895,8 @@ private:
 
         vkQueuePresentKHR(presentQueue, &presentInfo);
 
+        // Advance to the next frame every time
+        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
 
