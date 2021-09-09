@@ -11,6 +11,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VkVertexBuffer", "VkVertexB
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VkUniformBuffer", "VkUniformBuffer\VkUniformBuffer.vcxproj", "{72AD1665-BF68-414E-91E7-FC08FC0DD4D3}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VkTexture", "VkTexture\VkTexture.vcxproj", "{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -51,6 +53,14 @@ Global
 		{72AD1665-BF68-414E-91E7-FC08FC0DD4D3}.Release|x64.Build.0 = Release|x64
 		{72AD1665-BF68-414E-91E7-FC08FC0DD4D3}.Release|x86.ActiveCfg = Release|Win32
 		{72AD1665-BF68-414E-91E7-FC08FC0DD4D3}.Release|x86.Build.0 = Release|Win32
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Debug|x64.ActiveCfg = Debug|x64
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Debug|x64.Build.0 = Debug|x64
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Debug|x86.ActiveCfg = Debug|Win32
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Debug|x86.Build.0 = Debug|Win32
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Release|x64.ActiveCfg = Release|x64
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Release|x64.Build.0 = Release|x64
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Release|x86.ActiveCfg = Release|Win32
+		{F659EF75-0CCD-4A34-8339-2ABE44F8B6FA}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
