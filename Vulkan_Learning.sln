@@ -15,6 +15,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VkTexture", "VkTexture\VkTe
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VkDepthBuffer", "VkDepthBuffer\VkDepthBuffer.vcxproj", "{779F8AE2-E2D8-45E1-86A9-BFA18865753D}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VkObjLoader", "VkObjLoader\VkObjLoader.vcxproj", "{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -71,6 +73,14 @@ Global
 		{779F8AE2-E2D8-45E1-86A9-BFA18865753D}.Release|x64.Build.0 = Release|x64
 		{779F8AE2-E2D8-45E1-86A9-BFA18865753D}.Release|x86.ActiveCfg = Release|Win32
 		{779F8AE2-E2D8-45E1-86A9-BFA18865753D}.Release|x86.Build.0 = Release|Win32
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Debug|x64.ActiveCfg = Debug|x64
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Debug|x64.Build.0 = Debug|x64
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Debug|x86.ActiveCfg = Debug|Win32
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Debug|x86.Build.0 = Debug|Win32
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Release|x64.ActiveCfg = Release|x64
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Release|x64.Build.0 = Release|x64
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Release|x86.ActiveCfg = Release|Win32
+		{05BB6E1D-7C0A-4BB2-A176-59214FF89F9A}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
