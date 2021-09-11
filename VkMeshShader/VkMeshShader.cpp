@@ -261,6 +261,7 @@ private:
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
+        createMeshletBuffer();
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
