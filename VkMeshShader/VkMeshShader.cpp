@@ -26,8 +26,8 @@ static PFN_vkVoidFunction vkGetInstanceProcAddrStub(void* context, const char* n
 }
 
 #if ENABLE_MESH_SHADER
-    typedef void (VKAPI_PTR* PFN_vkCmdDrawMeshTasksNV)(VkCommandBuffer commandBuffer, uint32_t taskCount, uint32_t firstTask);
-    PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
+typedef void (VKAPI_PTR* PFN_vkCmdDrawMeshTasksNV)(VkCommandBuffer commandBuffer, uint32_t taskCount, uint32_t firstTask);
+PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
 #endif
 
 const uint32_t WIDTH = 800;
@@ -157,7 +157,7 @@ struct Mesh
     std::vector<Vertex> vertices;
 
     std::vector<uint16_t> indices;
-    
+
     std::vector<Meshlet> meshlets;
 } mesh;
 
@@ -243,7 +243,7 @@ private:
     void initVulkan()
     {
         buildMesh();
-        
+
         createInstance();
         setupDebugMessenger();
         createSurface();
@@ -1254,6 +1254,7 @@ private:
 
             vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 #if ENABLE_MESH_SHADER			
+            vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
             CmdDrawMeshTasksNV(commandBuffers[i], uint32_t(mesh.meshlets.size()), 0);
 #else
             VkBuffer vertexBuffers[] = { vertexBuffer };
