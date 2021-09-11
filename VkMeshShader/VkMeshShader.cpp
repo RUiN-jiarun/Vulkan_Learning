@@ -20,10 +20,15 @@
 
 #define ENABLE_MESH_SHADER 1
 
-//#if ENABLE_MESH_SHADER
-//    typedef void (VKAPI_PTR* PFN_vkCmdDrawMeshTasksNV)(VkCommandBuffer commandBuffer, uint32_t taskCount, uint32_t firstTask);
-//    PFN_vkCmdDrawMeshTasksNV vkCmdDrawMeshTasksNV;
-//#endif
+static PFN_vkVoidFunction vkGetInstanceProcAddrStub(void* context, const char* name)
+{
+    return vkGetInstanceProcAddr((VkInstance)context, name);
+}
+
+#if ENABLE_MESH_SHADER
+    typedef void (VKAPI_PTR* PFN_vkCmdDrawMeshTasksNV)(VkCommandBuffer commandBuffer, uint32_t taskCount, uint32_t firstTask);
+    PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
+#endif
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -42,9 +47,9 @@ const std::vector<const char*> deviceExtensions = {
 };
 
 #ifdef NDEBUG
-const bool enableValidationLayers = false;
-#else
 const bool enableValidationLayers = true;
+#else
+const bool enableValidationLayers = false;
 #endif
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger)
@@ -238,7 +243,7 @@ private:
     void initVulkan()
     {
         buildMesh();
-        //initMeshShaderExtensions();
+        
         createInstance();
         setupDebugMessenger();
         createSurface();
@@ -247,6 +252,9 @@ private:
         createSwapChain();
         createImageViews();
         createRenderPass();
+
+        initMeshShaderExtensions();
+
         createDescriptorSetLayout();
         createGraphicsPipeline();
         createFramebuffers();
@@ -315,12 +323,13 @@ private:
             mesh.meshlets.push_back(meshlet);
     }
 
-//    void initMeshShaderExtensions()
-//    {
-//#if ENABLE_MESH_SHADER
-//        vkCmdDrawMeshTasksNV = (PFN_vkCmdDrawMeshTasksNV)vkGetInstanceProcAddrStub(instance, "vkCmdDrawMeshTasksNV");
-//#endif
-//    }
+    void initMeshShaderExtensions()
+    {
+#if ENABLE_MESH_SHADER
+        CmdDrawMeshTasksNV = (PFN_vkCmdDrawMeshTasksNV)vkGetInstanceProcAddrStub(instance, "vkCmdDrawMeshTasksNV");
+        //CmdDrawMeshTasksNV = (PFN_vkCmdDrawMeshTasksNV)vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksNV");
+#endif
+    }
 
     void mainLoop()
     {
@@ -1245,7 +1254,7 @@ private:
 
             vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 #if ENABLE_MESH_SHADER			
-            vkCmdDrawMeshTasksNV(commandBuffers[i], uint32_t(mesh.meshlets.size()), 0);
+            CmdDrawMeshTasksNV(commandBuffers[i], uint32_t(mesh.meshlets.size()), 0);
 #else
             VkBuffer vertexBuffers[] = { vertexBuffer };
             VkDeviceSize offsets[] = { 0 };
@@ -1625,10 +1634,7 @@ private:
         return VK_FALSE;
     }
 
-    static PFN_vkVoidFunction vkGetInstanceProcAddrStub(void* context, const char* name)
-    {
-        return vkGetInstanceProcAddr((VkInstance)context, name);
-    }
+
 };
 
 int main()
