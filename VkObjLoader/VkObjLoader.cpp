@@ -36,8 +36,8 @@ static PFN_vkVoidFunction vkGetInstanceProcAddrStub(void* context, const char* n
 }
 
 #if ENABLE_MESH_SHADER
-typedef void (VKAPI_PTR* PFN_vkCmdDrawMeshTasksNV)(VkCommandBuffer commandBuffer, uint32_t taskCount, uint32_t firstTask);
-PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
+    typedef void (VKAPI_PTR* PFN_vkCmdDrawMeshTasksNV)(VkCommandBuffer commandBuffer, uint32_t taskCount, uint32_t firstTask);
+    PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
 #endif
 
 const uint32_t WIDTH = 800;
@@ -62,7 +62,7 @@ const std::vector<const char*> deviceExtensions = {
 #ifdef NDEBUG
 const bool enableValidationLayers = true;
 #else
-const bool enableValidationLayers = true;
+const bool enableValidationLayers = false;
 #endif
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger)
@@ -1406,6 +1406,19 @@ private:
 
     void createDescriptorPool()
     {
+#if ENABLE_MESH_SHADER
+        VkDescriptorPoolSize poolSize[2] = {};
+        poolSize[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSize[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+        poolSize[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSize[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size()) * 2;
+
+        VkDescriptorPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 2;
+        poolInfo.pPoolSizes = poolSize;
+        poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size());
+#else
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
@@ -1417,7 +1430,7 @@ private:
         poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
         poolInfo.pPoolSizes = poolSizes.data();
         poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size());
-
+#endif
         if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
         {
             throw std::runtime_error("failed to create descriptor pool!");
