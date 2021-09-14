@@ -562,6 +562,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="Shaders\shader.frag" />
+    <None Include="Shaders\shader.mesh" />
     <None Include="Shaders\shader.vert" />
   </ItemGroup>
   <ItemGroup>

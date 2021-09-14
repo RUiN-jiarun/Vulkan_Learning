@@ -28,6 +28,18 @@
 #include <set>
 #include <unordered_map>
 
+#define ENABLE_MESH_SHADER 1
+
+static PFN_vkVoidFunction vkGetInstanceProcAddrStub(void* context, const char* name)
+{
+    return vkGetInstanceProcAddr((VkInstance)context, name);
+}
+
+#if ENABLE_MESH_SHADER
+typedef void (VKAPI_PTR* PFN_vkCmdDrawMeshTasksNV)(VkCommandBuffer commandBuffer, uint32_t taskCount, uint32_t firstTask);
+PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
+#endif
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
@@ -42,10 +54,13 @@ const std::vector<const char*> validationLayers = {
 
 const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
+#if ENABLE_MESH_SHADER
+    ,VK_NV_MESH_SHADER_EXTENSION_NAME,
+#endif
 };
 
 #ifdef NDEBUG
-const bool enableValidationLayers = false;
+const bool enableValidationLayers = true;
 #else
 const bool enableValidationLayers = true;
 #endif
@@ -92,8 +107,8 @@ struct SwapChainSupportDetails
 
 struct Vertex
 {
-    glm::vec3 pos;
-    glm::vec3 color;
+    glm::vec4 pos;
+    glm::vec4 color;
     glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription()
@@ -157,6 +172,23 @@ struct UniformBufferObject
     alignas(16) glm::mat4 proj;
 };
 
+struct Meshlet
+{
+    uint32_t vertices[64];
+    uint32_t indices[126 * 3];
+    uint32_t indexCount;
+    uint32_t vertexCount;
+};
+
+struct Mesh
+{
+    std::vector<Vertex> vertices;
+
+    std::vector<uint16_t> indices;
+
+    std::vector<Meshlet> meshlets;
+} mesh;
+
 class HelloTriangleApplication
 {
 public:
@@ -212,6 +244,9 @@ private:
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
+    // 9.13 Change to MS pipeline test
+    VkBuffer meshBuffer;
+    VkDeviceMemory meshBufferMemory;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
@@ -248,6 +283,7 @@ private:
 
     void initVulkan()
     {
+        initMeshShaderExtensions(); // 9.13 Update
         createInstance();
         setupDebugMessenger();
         createSurface();
@@ -265,8 +301,10 @@ private:
         createTextureImageView();
         createTextureSampler();
         loadModel();                // 9.10 Update
+        buildMesh();                // 9.13 Update
         createVertexBuffer();
         createIndexBuffer();
+        createMeshletBuffer();      // 9.13 Update
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
@@ -386,6 +424,14 @@ private:
         createCommandBuffers();
 
         imagesInFlight.resize(swapChainImages.size(), VK_NULL_HANDLE);
+    }
+
+    void initMeshShaderExtensions()
+    {
+#if ENABLE_MESH_SHADER
+        CmdDrawMeshTasksNV = (PFN_vkCmdDrawMeshTasksNV)vkGetInstanceProcAddrStub(instance, "vkCmdDrawMeshTasksNV");
+        //CmdDrawMeshTasksNV = (PFN_vkCmdDrawMeshTasksNV)vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksNV");
+#endif
     }
 
     void createInstance()
@@ -671,6 +717,32 @@ private:
 
     void createDescriptorSetLayout()
     {
+        VkDescriptorSetLayoutBinding setBindings[3] = {};
+#if ENABLE_MESH_SHADER
+        
+        setBindings[0].binding = 0;
+        setBindings[0].descriptorCount = 1;
+        setBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        setBindings[0].pImmutableSamplers = nullptr;
+        setBindings[0].stageFlags = VK_SHADER_STAGE_MESH_BIT_NV;
+
+        setBindings[1].binding = 1;
+        setBindings[1].descriptorCount = 1;
+        setBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        setBindings[1].pImmutableSamplers = nullptr;
+        setBindings[1].stageFlags = VK_SHADER_STAGE_MESH_BIT_NV;
+
+        setBindings[2].binding = 2;
+        setBindings[2].descriptorCount = 1;
+        setBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        setBindings[2].pImmutableSamplers = nullptr;
+        setBindings[2].stageFlags = VK_SHADER_STAGE_MESH_BIT_NV;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = sizeof(setBindings) / sizeof(VkDescriptorSetLayoutBinding);
+        layoutInfo.pBindings = setBindings;
+#else
         VkDescriptorSetLayoutBinding uboLayoutBinding{};
         uboLayoutBinding.binding = 0;
         uboLayoutBinding.descriptorCount = 1;
@@ -690,6 +762,17 @@ private:
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
         layoutInfo.pBindings = bindings.data();
+#endif
+
+       /* VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = sizeof(setBindings) / sizeof(VkDescriptorSetLayoutBinding);
+        layoutInfo.pBindings = setBindings;
+
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create descriptor set layout!");
+        }*/
 
         if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
         {
@@ -699,25 +782,39 @@ private:
 
     void createGraphicsPipeline()
     {
+#if ENABLE_MESH_SHADER
+        auto meshShaderCode = readFile("shaders/mesh.spv");
+        VkShaderModule meshShaderModule = createShaderModule(meshShaderCode);
+
+        VkPipelineShaderStageCreateInfo meshShaderStageInfo = {};
+        meshShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        meshShaderStageInfo.stage = VK_SHADER_STAGE_MESH_BIT_NV;
+        meshShaderStageInfo.module = meshShaderModule;
+        meshShaderStageInfo.pName = "main";
+#else 
         auto vertShaderCode = readFile("shaders/vert.spv");
-        auto fragShaderCode = readFile("shaders/frag.spv");
-
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
 
-        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+        VkPipelineShaderStageCreateInfo vertShaderStageInfo = {};
         vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
         vertShaderStageInfo.module = vertShaderModule;
         vertShaderStageInfo.pName = "main";
+#endif
+        auto fragShaderCode = readFile("shaders/frag.spv");
+        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
 
-        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+        VkPipelineShaderStageCreateInfo fragShaderStageInfo = {};
         fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         fragShaderStageInfo.module = fragShaderModule;
         fragShaderStageInfo.pName = "main";
 
+#if ENABLE_MESH_SHADER
+        VkPipelineShaderStageCreateInfo shaderStages[] = { meshShaderStageInfo, fragShaderStageInfo };
+#else 
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+#endif
 
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -824,8 +921,11 @@ private:
             throw std::runtime_error("failed to create graphics pipeline!");
         }
 
-        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+#if ENABLE_MESH_SHADER
+        vkDestroyShaderModule(device, meshShaderModule, nullptr);
+#else
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
+#endif
     }
 
     void createFramebuffers()
@@ -1141,7 +1241,8 @@ private:
                 vertex.pos = {
                     attrib.vertices[3 * index.vertex_index + 0],
                     attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
+                    attrib.vertices[3 * index.vertex_index + 2],
+                    0.0f
                 };
 
                 // fix the texture coordinate
@@ -1150,7 +1251,7 @@ private:
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
 
-                vertex.color = { 1.0f, 1.0f, 1.0f };
+                vertex.color = { 1.0f, 1.0f, 1.0f, 0.0f };
 
                 // Vertex deduplication
                 // use an unordered_map to keep track of the unique vertices and respective indices
@@ -1163,6 +1264,64 @@ private:
                 indices.push_back(uniqueVertices[vertex]);
             }
         }
+    }
+
+    /// <summary>
+    /// Build meshlet
+    /// </summary>
+    void buildMesh()
+    {
+        mesh.vertices.assign(vertices.begin(), vertices.end());
+        mesh.indices.assign(indices.begin(), indices.end());
+        Meshlet meshlet = {};
+
+        std::vector<uint8_t> meshletVertices(mesh.vertices.size(), 0xff);
+
+        for (size_t i = 0; i < mesh.indices.size(); i += 3)
+        {
+            unsigned int a = mesh.indices[i + 0];
+            unsigned int b = mesh.indices[i + 1];
+            unsigned int c = mesh.indices[i + 2];
+
+            uint8_t& av = meshletVertices[a];
+            uint8_t& bv = meshletVertices[b];
+            uint8_t& cv = meshletVertices[c];
+
+            if (meshlet.vertexCount + (av == 0xff) + (bv == 0xff) + (cv == 0xff) > 64 || meshlet.indexCount + 3 > 126 * 3)
+            {
+                mesh.meshlets.push_back(meshlet);
+
+                for (size_t j = 0; j < meshlet.vertexCount; ++j)
+                    meshletVertices[meshlet.vertices[j]] = 0xff;
+
+                meshlet = {};
+            }
+
+            if (av == 0xff)
+            {
+                av = meshlet.vertexCount;
+                meshlet.vertices[meshlet.vertexCount++] = a;
+            }
+
+            if (bv == 0xff)
+            {
+                bv = meshlet.vertexCount;
+                meshlet.vertices[meshlet.vertexCount++] = b;
+            }
+
+            if (cv == 0xff)
+            {
+                cv = meshlet.vertexCount;
+                meshlet.vertices[meshlet.vertexCount++] = c;
+            }
+
+            meshlet.indices[meshlet.indexCount++] = av;
+            meshlet.indices[meshlet.indexCount++] = bv;
+            meshlet.indices[meshlet.indexCount++] = cv;
+        }
+
+        if (meshlet.indexCount)
+            mesh.meshlets.push_back(meshlet);
     }
 
     void createVertexBuffer()
@@ -1202,6 +1361,31 @@ private:
         createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
 
         copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    /// <summary>
+    /// 9.13 Update
+    /// Meshlet Buffer
+    /// </summary>
+    void createMeshletBuffer()
+    {
+        VkDeviceSize bufferSize = sizeof(mesh.meshlets[0]) * mesh.meshlets.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, mesh.meshlets.data(), (size_t)bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, meshBuffer, meshBufferMemory);
+
+        copyBuffer(stagingBuffer, meshBuffer, bufferSize);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
@@ -1257,6 +1441,49 @@ private:
 
         for (size_t i = 0; i < swapChainImages.size(); i++)
         {
+            
+#if ENABLE_MESH_SHADER
+            VkDescriptorBufferInfo bufferInfo[3] = {};
+            bufferInfo[0].buffer = uniformBuffers[i];
+            bufferInfo[0].offset = 0;
+            bufferInfo[0].range = sizeof(UniformBufferObject);
+
+            bufferInfo[1].buffer = vertexBuffer;
+            bufferInfo[1].offset = 0;
+            bufferInfo[1].range = mesh.vertices.size() * sizeof(mesh.vertices[0]);
+
+            bufferInfo[2].buffer = meshBuffer;
+            bufferInfo[2].offset = 0;
+            bufferInfo[2].range = mesh.meshlets.size() * sizeof(mesh.meshlets[0]);
+
+            VkWriteDescriptorSet descriptorWrite[3] = {};
+            descriptorWrite[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite[0].dstSet = descriptorSets[i];
+            descriptorWrite[0].dstBinding = 0;
+            descriptorWrite[0].dstArrayElement = 0;
+            descriptorWrite[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite[0].descriptorCount = 1;
+            descriptorWrite[0].pBufferInfo = &bufferInfo[0];
+
+            descriptorWrite[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite[1].dstSet = descriptorSets[i];
+            descriptorWrite[1].dstBinding = 1;
+            descriptorWrite[1].dstArrayElement = 0;
+            descriptorWrite[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            descriptorWrite[1].descriptorCount = 1;
+            descriptorWrite[1].pBufferInfo = &bufferInfo[1];
+
+            descriptorWrite[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite[2].dstSet = descriptorSets[i];
+            descriptorWrite[2].dstBinding = 2;
+            descriptorWrite[2].dstArrayElement = 0;
+            descriptorWrite[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            descriptorWrite[2].descriptorCount = 1;
+            descriptorWrite[2].pBufferInfo = &bufferInfo[2];
+
+            vkUpdateDescriptorSets(device, 3, descriptorWrite, 0, nullptr);
+            //vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+#else
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = uniformBuffers[i];
             bufferInfo.offset = 0;
@@ -1286,6 +1513,8 @@ private:
             descriptorWrites[1].pImageInfo = &imageInfo;
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+            //vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+#endif
         }
     }
 
@@ -1422,6 +1651,10 @@ private:
             vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+            vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
+#if ENABLE_MESH_SHADER	
+            CmdDrawMeshTasksNV(commandBuffers[i], uint32_t(mesh.meshlets.size()), 0);
+#else
 
             VkBuffer vertexBuffers[] = { vertexBuffer };
             VkDeviceSize offsets[] = { 0 };
@@ -1430,10 +1663,9 @@ private:
             // 9.10 Change indices type from uint16_t to uint32_t
             vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-            vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
 
             vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-
+#endif
             vkCmdEndRenderPass(commandBuffers[i]);
 
             if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS)
@@ -1736,6 +1968,9 @@ private:
 
         std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
 
+#if ENABLE_MESH_SHADER
+        extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+#endif
         if (enableValidationLayers)
         {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);

@@ -21,6 +21,9 @@
     <None Include="Shaders\shader.vert">
       <Filter>资源文件</Filter>
     </None>
+    <None Include="Shaders\shader.mesh">
+      <Filter>资源文件</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="VkObjLoader.cpp">

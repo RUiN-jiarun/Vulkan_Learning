@@ -2,8 +2,17 @@
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
 
 #include <iostream>
 #include <fstream>
@@ -17,6 +26,7 @@
 #include <array>
 #include <optional>
 #include <set>
+#include <unordered_map>
 
 #define ENABLE_MESH_SHADER 1
 
@@ -32,6 +42,8 @@ PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
+
+const std::string MODEL_PATH = "models/viking_room.obj";
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -97,6 +109,7 @@ struct Vertex
     // 全部用齐次
     glm::vec4 pos;
     glm::vec4 color;
+    glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription()
     {
@@ -108,9 +121,9 @@ struct Vertex
         return bindingDescription;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions()
     {
-        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
@@ -122,9 +135,35 @@ struct Vertex
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
 
+        attributeDescriptions[2].binding = 0;
+        attributeDescriptions[2].location = 2;
+        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+
         return attributeDescriptions;
     }
+
+    // Update 9.10
+    // set up for unordered_map sorting
+    bool operator==(const Vertex& other) const
+    {
+        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+    }
 };
+
+// Update 9.10
+// implement a hash function
+// specify a template specialization for std::hash<T>
+namespace std
+{
+    template<> struct hash<Vertex>
+    {
+        size_t operator()(Vertex const& vertex) const
+        {
+            return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
+        }
+    };
+}
 
 struct UniformBufferObject
 {
@@ -141,16 +180,16 @@ struct Meshlet
     uint32_t vertexCount;
 };
 
-const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 0.0f}},
-    {{-0.5f, 0.5f,0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}}
-};
-
-const std::vector<uint16_t> indices = {
-    0, 1, 2, 2, 3, 0
-};
+//const std::vector<Vertex> vertices = {
+//    {{-0.5f, -0.5f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 0.0f}},
+//    {{0.5f, -0.5f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}},
+//    {{0.5f, 0.5f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 0.0f}},
+//    {{-0.5f, 0.5f,0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}}
+//};
+//
+//const std::vector<uint16_t> indices = {
+//    0, 1, 2, 2, 3, 0
+//};
 
 struct Mesh
 {
@@ -199,6 +238,13 @@ private:
     VkPipeline graphicsPipeline;
 
     VkCommandPool commandPool;
+
+    VkImage depthImage;
+    VkDeviceMemory depthImageMemory;
+    VkImageView depthImageView;
+
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
 
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
@@ -257,6 +303,7 @@ private:
 
         createDescriptorSetLayout();
         createGraphicsPipeline();
+
         createFramebuffers();
         createCommandPool();
         createVertexBuffer();
@@ -271,6 +318,54 @@ private:
 
     void buildMesh()
     {
+        // fill in the attrib container
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str()))
+        {
+            throw std::runtime_error(warn + err);
+        }
+
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+        // Combine all of the faces in the file into a single model
+        for (const auto& shape : shapes)
+        {
+            for (const auto& index : shape.mesh.indices)
+            {
+                Vertex vertex{};
+
+                // Trianglation has been done
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2],
+                    0.0f
+                };
+
+                // fix the texture coordinate
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
+
+                vertex.color = { 1.0f, 1.0f, 1.0f, 0.0f };
+
+                // Vertex deduplication
+                // use an unordered_map to keep track of the unique vertices and respective indices
+                if (uniqueVertices.count(vertex) == 0)
+                {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                indices.push_back(uniqueVertices[vertex]);
+            }
+        }
+
         mesh.vertices.assign(vertices.begin(), vertices.end());
         mesh.indices.assign(indices.begin(), indices.end());
         Meshlet meshlet = {};
